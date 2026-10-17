@@ -26,7 +26,7 @@ h1{font-size:20px;margin:0}
 .empty{color:var(--muted);padding:24px 0}
 </style></head><body>
 <header><h1>JAO monthly auctions</h1>
-<label>Delivery month <input type="month" id="month"></label>
+<span>Delivery month <button id="prev" aria-label="previous month">‹</button> <select id="mon" aria-label="month"></select> <select id="yr" aria-label="year"></select> <button id="next" aria-label="next month">›</button></span>
 <span class="legend"><span><i style="background:var(--resale)"></i>LT resale</span><span><i style="background:var(--bid)"></i>bid gate</span>
 <span><i style="background:var(--dispute)"></i>dispute submission</span><span><i style="background:var(--now)"></i>now</span></span>
 <span class="legend" id="tz"></span><span class="legend">data updated __UPDATED__</span></header>
@@ -38,13 +38,21 @@ const t = s => s ? new Date(s).getTime() : null;
 const fmt = new Intl.DateTimeFormat(undefined,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
 document.getElementById('tz').textContent = 'times: ' + Intl.DateTimeFormat().resolvedOptions().timeZone;
 const months = [...new Set(DATA.map(a => a.delivery_month.slice(0,7)))].sort();
-const pick = document.getElementById('month');
-const ahead = new Date(); ahead.setMonth(ahead.getMonth()+12);
-pick.min = months[0]; pick.max = ahead.toISOString().slice(0,7);
-const nd = new Date(); nd.setMonth(nd.getMonth()+1);
-const next = nd.toISOString().slice(0,7);
-pick.value = next;
-pick.onchange = draw; window.onresize = draw;
+// month/year selects instead of <input type="month">, which Firefox and Safari show as a plain text box
+const pick = {value: ''}, monSel = document.getElementById('mon'), yrSel = document.getElementById('yr');
+const now0 = new Date(), y0 = +months[0].slice(0,4), y1 = now0.getFullYear() + 1 + (now0.getMonth() == 11 ? 1 : 0);
+for(let i = 0; i < 12; i++) monSel.add(new Option(new Date(2000,i,15).toLocaleString(undefined,{month:'long'}), String(i+1).padStart(2,'0')));
+for(let y = y0; y <= y1; y++) yrSel.add(new Option(y, y));
+function setMonth(v){
+  if(v < months[0] || +v.slice(0,4) > y1) return;
+  pick.value = v; monSel.value = v.slice(5); yrSel.value = v.slice(0,4); draw();
+}
+function step(n){ const d = new Date(+pick.value.slice(0,4), +pick.value.slice(5)-1+n, 15);
+  setMonth(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')); }
+monSel.onchange = yrSel.onchange = () => setMonth(yrSel.value+'-'+monSel.value);
+document.getElementById('prev').onclick = () => step(-1);
+document.getElementById('next').onclick = () => step(1);
+window.onresize = draw;
 
 function draw(){
   const el = document.getElementById('chart'), m = pick.value;
@@ -80,5 +88,5 @@ function draw(){
   el.innerHTML = h;
 }
 function f2(s){ return s ? fmt.format(t(s)) : '–'; }
-draw();
+{ const d = new Date(); d.setDate(15); d.setMonth(d.getMonth()+1); setMonth(d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")); }
 </script></body></html>
