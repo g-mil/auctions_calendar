@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>JAO Auction Calendar</title>
+<style>
+:root{--bg:#f6f5f1;--fg:#14213d;--muted:#6b7280;--grid:#d9d7cf;--bid:#26c6b0;--resale:#6b7280;--dispute:#f2b84b;--now:#e53935}
+@media (prefers-color-scheme:dark){:root{--bg:#121826;--fg:#e8eaf0;--muted:#9aa3b2;--grid:#2c3445}}
+body{margin:0;padding:16px;background:var(--bg);color:var(--fg);font:14px system-ui,sans-serif}
+header{display:flex;gap:16px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+h1{font-size:20px;margin:0}
+.legend span{display:inline-flex;align-items:center;gap:4px;margin-right:12px;color:var(--muted)}
+.legend i{width:14px;height:10px;border-radius:2px;display:inline-block}
+#wrap{overflow-x:auto}
+#chart{position:relative;min-width:900px;padding-top:22px}
+.row{position:relative;height:30px;border-bottom:1px solid var(--grid)}
+.lab{position:absolute;left:0;width:290px;top:6px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{position:absolute;top:4px;height:22px;border-radius:3px;color:#fff;font-size:12px;line-height:22px;
+     padding:0 6px;white-space:nowrap;overflow:hidden;box-sizing:border-box;cursor:default}
+.resale{background:var(--resale);top:11px;height:8px;opacity:.5}
+.bid{background:var(--bid);color:#06302a}
+.dispute{background:var(--dispute);top:11px;height:8px;opacity:.7}
+.cancelled{background:repeating-linear-gradient(45deg,#aaa 0 6px,#ccc 6px 12px);text-decoration:line-through}
+.tick{position:absolute;top:0;bottom:0;border-left:1px solid var(--grid)}
+.tick b{position:absolute;top:2px;left:2px;font-weight:400;font-size:11px;color:var(--muted);white-space:nowrap}
+.wk{border-left-color:var(--muted)}
+.now{position:absolute;top:0;bottom:0;border-left:2px solid var(--now);z-index:2}
+.empty{color:var(--muted);padding:24px 0}
+</style></head><body>
+<header><h1>JAO monthly auctions</h1>
+<label>Delivery month <input type="month" id="month"></label>
+<span class="legend"><span><i style="background:var(--resale)"></i>LT resale</span><span><i style="background:var(--bid)"></i>bid gate</span>
+<span><i style="background:var(--dispute)"></i>dispute submission</span><span><i style="background:var(--now)"></i>now</span></span>
+<span class="legend" id="tz"></span><span class="legend">data updated __UPDATED__</span></header>
+<div id="wrap"><div id="chart"></div></div>
+<script>
+const DATA = __DATA__;
+const LEFT = 300, DAY = 864e5;
+const t = s => s ? new Date(s).getTime() : null;
+const fmt = new Intl.DateTimeFormat(undefined,{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',hourCycle:'h23'});
+document.getElementById('tz').textContent = 'times: ' + Intl.DateTimeFormat().resolvedOptions().timeZone;
+const months = [...new Set(DATA.map(a => a.delivery_month.slice(0,7)))].sort();
+const pick = document.getElementById('month');
+const ahead = new Date(); ahead.setMonth(ahead.getMonth()+12);
+pick.min = months[0]; pick.max = ahead.toISOString().slice(0,7);
+const nd = new Date(); nd.setMonth(nd.getMonth()+1);
+const next = nd.toISOString().slice(0,7);
+pick.value = next;
+pick.onchange = draw; window.onresize = draw;
+
+function draw(){
+  const el = document.getElementById('chart'), m = pick.value;
+  const rows = DATA.filter(a => a.delivery_month.startsWith(m) && a.bidGateClosure)
+                   .sort((a,b) => t(a.bidGateClosure)-t(b.bidGateClosure) || a.corridor.localeCompare(b.corridor));
+  if(!rows.length){ el.innerHTML = '<div class="empty">Auction dates for '+new Date(m+'-15').toLocaleString(undefined,{month:'long',year:'numeric'})+' are not yet available.</div>'; return; }
+  // axis: the month before delivery, widened to cover every bid gate
+  const [y,mo] = m.split('-').map(Number);
+  let x0 = Date.UTC(y,mo-2,1), x1 = Date.UTC(y,mo-1,1);
+  for(const a of rows){ x0 = Math.min(x0, t(a.bidGateOpening)-DAY); x1 = Math.max(x1, t(a.bidGateClosure)+DAY); }
+  const W = Math.max(900, el.parentElement.clientWidth) - LEFT;
+  const X = v => LEFT + Math.max(0, Math.min(W, (v-x0)/(x1-x0)*W));
+  let h = '';
+  for(let d = new Date(x0); d.getTime() <= x1; d.setUTCDate(d.getUTCDate()+1)){
+    h += `<div class="tick${d.getUTCDay()==1?' wk':''}" style="left:${X(d.getTime())}px"><b>${d.getUTCDate()}${d.getUTCDate()==1||d.getTime()==x0?' '+d.toLocaleString(undefined,{month:'short',timeZone:'UTC'}):''}</b></div>`;
+  }
+  const bar = (cls,a,b,text,tip) => a&&b&&t(b)>x0&&t(a)<x1 ? `<div class="bar ${cls}" style="left:${X(t(a))}px;width:${Math.max(4,X(t(b))-X(t(a)))}px" title="${tip}">${text}</div>` : '';
+  for(const a of rows){
+    const cancelled = a.cancelled === true, tr = a.identification.slice(-2);
+    const tip = [a.identification, cancelled?'CANCELLED':'',
+      'Resale: '+f2(a.ltResaleGateOpening)+' – '+f2(a.ltResaleGateClosure),
+      'Bid gate: '+f2(a.bidGateOpening)+' – '+f2(a.bidGateClosure),
+      'Results: '+f2(a.provisionalAuctionresult),
+      'Disputes: '+f2(a.disputeSubmissionGateOpening)+' – '+f2(a.disputeSubmissionGateClosure)].filter(Boolean).join('\n');
+    h += `<div class="row"><div class="lab" title="${a.identification}">${a.corridor} <small>-${tr}</small> <small>closes ${fmt.format(t(a.bidGateClosure))}</small></div>`
+      + bar('resale',a.ltResaleGateOpening,a.ltResaleGateClosure,'',tip)
+      + bar('dispute',a.disputeSubmissionGateOpening,a.disputeSubmissionGateClosure,'',tip)
+      + bar('bid'+(cancelled?' cancelled':''),a.bidGateOpening,a.bidGateClosure,'',tip)
+      + '</div>';
+  }
+  const now = Date.now();
+  if(now>x0 && now<x1) h += `<div class="now" style="left:${X(now)}px" title="now"></div>`;
+  el.innerHTML = h;
+}
+function f2(s){ return s ? fmt.format(t(s)) : '–'; }
+draw();
+</script></body></html>
