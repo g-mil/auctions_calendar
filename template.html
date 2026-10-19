@@ -28,6 +28,7 @@ h1{font-size:20px;margin:0}
 <header><h1>JAO monthly auctions</h1>
 <span>Delivery month <button id="prev" aria-label="previous month">‹</button> <select id="mon" aria-label="month"></select> <select id="yr" aria-label="year"></select> <button id="next" aria-label="next month">›</button></span>
 <input id="filter" type="search" placeholder="Filter corridors, e.g. RO or GR-BG" aria-label="filter corridors" size="28">
+<select id="gate" aria-label="bid gate state"><option value="">All gates</option><option value="open">Open</option><option value="future">Not yet open</option><option value="closed">Closed</option></select>
 <span class="legend"><span><i style="background:var(--resale)"></i>LT resale</span><span><i style="background:var(--bid)"></i>bid gate</span>
 <span><i style="background:var(--dispute)"></i>dispute submission</span><span><i style="background:var(--now)"></i>now</span></span>
 <span class="legend" id="tz"></span><span class="legend">data updated __UPDATED__</span></header>
@@ -54,16 +55,20 @@ monSel.onchange = yrSel.onchange = () => setMonth(yrSel.value+'-'+monSel.value);
 document.getElementById('prev').onclick = () => step(-1);
 document.getElementById('next').onclick = () => step(1);
 window.onresize = draw;
-document.getElementById('filter').oninput = draw;
+document.getElementById('filter').oninput = document.getElementById('gate').onchange = draw;
+// bid gate state now: future (not yet open), open, closed
+const gateState = a => Date.now() < t(a.bidGateOpening) ? 'future' : Date.now() < t(a.bidGateClosure) ? 'open' : 'closed';
 
 function draw(){
   const el = document.getElementById('chart'), m = pick.value;
   // filter: any of the space/comma-separated terms, case-insensitive, anywhere in the corridor name
   const terms = document.getElementById('filter').value.toUpperCase().split(/[\s,]+/).filter(Boolean);
   const inMonth = DATA.filter(a => a.delivery_month.startsWith(m) && a.bidGateClosure);
+  const gate = document.getElementById('gate').value;
   const rows = inMonth.filter(a => !terms.length || terms.some(q => a.corridor.toUpperCase().includes(q)))
+                   .filter(a => !gate || gateState(a) == gate)
                    .sort((a,b) => t(a.bidGateClosure)-t(b.bidGateClosure) || a.corridor.localeCompare(b.corridor));
-  if(inMonth.length && !rows.length){ el.innerHTML = '<div class="empty">No corridor matches the filter.</div>'; return; }
+  if(inMonth.length && !rows.length){ el.innerHTML = '<div class="empty">No auction matches the filters.</div>'; return; }
   if(!rows.length){ el.innerHTML = '<div class="empty">Auction dates for '+new Date(m+'-15').toLocaleString(undefined,{month:'long',year:'numeric'})+' are not yet available.</div>'; return; }
   // axis: the month before delivery, widened to cover every bid gate
   const [y,mo] = m.split('-').map(Number);
