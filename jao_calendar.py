@@ -1,7 +1,7 @@
 """JAO monthly auction calendar.
 
-python jao_calendar.py            fetch this month's and all published future auctions of the corridors in
-                                  corridors.txt, merge them into data/auctions.json, write index.html
+python jao_calendar.py            fetch this month's and all published future auctions of every JAO
+                                  corridor, merge them into data/auctions.json, write index.html
 python jao_calendar.py --render   only rewrite index.html from data/auctions.json
 
 JAO API key: environment variable JAO_API_KEY, or a line JAO_API_KEY=... in .env next to this file.
@@ -22,7 +22,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DATA = HERE / "data" / "auctions.json"
-BASE = "https://api.jao.eu/OWSMP/getauctions"
+BASE = "https://api.jao.eu/OWSMP/"
 AHEAD = 12          # months after the current one to try; stops at the first month JAO has nothing for
 GATES = ["ltResaleGateOpening", "ltResaleGateClosure", "bidGateOpening", "bidGateClosure",
          "provisionalAuctionresult", "disputeSubmissionGateOpening", "disputeSubmissionGateClosure"]
@@ -40,14 +40,12 @@ def api_key() -> str:
     return key
 
 
-def monthly_auctions(corridor: str, month: date, key: str) -> list[dict]:
-    """JAO's monthly auctions of `corridor` delivering in `month`; [] when JAO has none yet."""
-    last = month.replace(day=monthrange(month.year, month.month)[1])
-    q = urllib.parse.urlencode({"corridor": corridor, "horizon": "Monthly", "shadow": 0,
-                                "fromdate": (month - timedelta(days=1)).isoformat(), "todate": last.isoformat()})
+def get(endpoint: str, key: str, **params) -> list[dict]:
+    """GET a JAO endpoint; [] when JAO has no data."""
+    q = urllib.parse.urlencode(params)
     for attempt in range(4):
         try:
-            req = urllib.request.Request(f"{BASE}?{q}", headers={"AUTH_API_KEY": key})
+            req = urllib.request.Request(f"{BASE}{endpoint}?{q}", headers={"AUTH_API_KEY": key})
             with urllib.request.urlopen(req, timeout=60) as r:
                 time.sleep(0.5)
                 return json.load(r)
@@ -58,7 +56,14 @@ def monthly_auctions(corridor: str, month: date, key: str) -> list[dict]:
             if e.code == 404 or (e.code == 400 and b"no data found" in e.read().lower()):
                 return []
             raise
-    raise RuntimeError(f"JAO rate limit: {corridor} {month:%Y-%m}")
+    raise RuntimeError(f"JAO rate limit: {endpoint} {params}")
+
+
+def monthly_auctions(corridor: str, month: date, key: str) -> list[dict]:
+    """JAO's monthly auctions of `corridor` delivering in `month`; [] when JAO has none yet."""
+    last = month.replace(day=monthrange(month.year, month.month)[1])
+    return get("getauctions", key, corridor=corridor, horizon="Monthly", shadow=0,
+               fromdate=(month - timedelta(days=1)).isoformat(), todate=last.isoformat())
 
 
 def record(a: dict, corridor: str) -> dict:
@@ -76,12 +81,16 @@ def add_months(d: date, n: int) -> date:
 
 def update(store: dict[str, dict]) -> None:
     key = api_key()
-    corridors = [c.strip() for c in (HERE / "corridors.txt").read_text().splitlines() if c.strip()]
+    corridors = sorted(c["value"] for c in get("getcorridors", key))
     this = date.today().replace(day=1)
     for corridor in corridors:
         for i in range(AHEAD + 1):
             m = add_months(this, i)
-            got = [record(a, corridor) for a in monthly_auctions(corridor, m, key)]
+            try:
+                got = [record(a, corridor) for a in monthly_auctions(corridor, m, key)]
+            except urllib.error.HTTPError as e:     # one odd corridor must not stop the others
+                print(f"{corridor} {m:%Y-%m}: skipped (HTTP {e.code})")
+                break
             got = [r for r in got if r["delivery_month"] == f"{m:%Y-%m}"]
             for r in got:
                 store[r["identification"]] = r

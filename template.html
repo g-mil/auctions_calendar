@@ -66,8 +66,10 @@ function draw(){
   const W = Math.max(900, el.parentElement.clientWidth) - LEFT;
   const X = v => LEFT + Math.max(0, Math.min(W, (v-x0)/(x1-x0)*W));
   let h = '';
+  const dense = W*DAY/(x1-x0) < 24;   // under 24 px per day: label only Mondays and the 1st
   for(let d = new Date(x0); d.getTime() <= x1; d.setUTCDate(d.getUTCDate()+1)){
-    h += `<div class="tick${d.getUTCDay()==1?' wk':''}" style="left:${X(d.getTime())}px"><b>${d.getUTCDate()}${d.getUTCDate()==1||d.getTime()==x0?' '+d.toLocaleString(undefined,{month:'short',timeZone:'UTC'}):''}</b></div>`;
+    const show = !dense || d.getUTCDay()==1 || d.getUTCDate()==1;
+    if(show) h += `<div class="tick${d.getUTCDay()==1?' wk':''}" style="left:${X(d.getTime())}px"><b>${d.getUTCDate()}${d.getUTCDate()==1||d.getTime()==x0?' '+d.toLocaleString(undefined,{month:'short',timeZone:'UTC'}):''}</b></div>`;
   }
   const bar = (cls,a,b,text,tip) => a&&b&&t(b)>x0&&t(a)<x1 ? `<div class="bar ${cls}" style="left:${X(t(a))}px;width:${Math.max(4,X(t(b))-X(t(a)))}px" title="${tip}">${text}</div>` : '';
   for(const a of rows){
